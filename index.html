@@ -14,7 +14,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="white">
     <meta name="theme-color" content="#ffffff">
     <link rel="apple-touch-icon" href="https://img1.pic.in.th/images/IMG_660722f5f0118feb0b69.png">
-    <!-- Embedded Manifest with New Name and Logo -->
+    <!-- Embedded Manifest -->
     <link rel="manifest" href="data:application/manifest+json;charset=utf-8,%7B%22name%22%3A%22Dannyofficials%22%2C%22short_name%22%3A%22Dannyofficials%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%23ffffff%22%2C%22theme_color%22%3A%22%23ffffff%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22https%3A%2F%2Fimg1.pic.in.th%2Fimages%2FIMG_660722f5f0118feb0b69.png%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%2Fpng%22%7D%5D%7D">
 
     <!-- Libraries -->
@@ -37,7 +37,6 @@
         .laser-card::before {
             content: ''; position: absolute;
             top: -50%; left: -50%; width: 200%; height: 200%;
-            /* ธีมสีแดง: #dc2626 */
             background: conic-gradient(transparent, transparent, transparent, #dc2626);
             animation: rotate 4s linear infinite; z-index: -1; opacity: 0.5;
         }
@@ -156,7 +155,7 @@
                         <div id="dropContent">
                             <i class="fas fa-cloud-upload-alt text-3xl text-slate-400 mb-2"></i>
                             <p class="text-sm text-slate-600">คลิก หรือ ลากรูปภาพสลิปมาวางที่นี่</p>
-                            <p class="text-[10px] text-red-500 mt-2">* ระบบจะตรวจสอบชื่อผู้รับและยอดเงินอัตโนมัติ</p>
+                            <p class="text-[10px] text-red-500 mt-2">* ระบบจะตรวจสอบชื่อและยอดเงินในสลิปอัตโนมัติ</p>
                         </div>
                         <img id="slipPreview" class="hidden absolute inset-0 w-full h-full object-contain bg-white">
                     </div>
@@ -295,14 +294,20 @@
     <!-- Script Logic -->
     <script>
         // ==========================================
-        // การตั้งค่าข้อมูลทั่วไป (แก้ไขตรงนี้ได้เลย)
+        // ⚙️ การตั้งค่าข้อมูลทั่วไป (แก้ไขตรงนี้ได้เลย)
         // ==========================================
         
         const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx84DULO0-aCCbPyv7FtG6JpeIXljaJ7ZJ7tFYfN_A4sE5K1cL22jmFY02QH-GpCikB/exec'; // ใส่ URL จาก Google Apps Script
         
-        // เว้นที่ไว้ให้ใส่รูปคิวอาร์โค้ดและชื่อผู้รับเงินภายหลัง
-        const QR_CODE_IMAGE_URL = 'https://img2.pic.in.th/IMG_6610d23c9fa6b5043eea.jpeg'; // เปลี่ยนเป็นลิงก์รูป QR Code
-        const RECEIVER_NAME = 'แดนนี่'; // เปลี่ยนเป็นชื่อที่ต้องการให้ระบบ OCR ตรวจจับ เช่น นาย สมชาย
+        // 1. ลิงก์รูปภาพ QR Code
+        const QR_CODE_IMAGE_URL = 'https://img2.pic.in.th/IMG_6610d23c9fa6b5043eea.jpeg'; 
+        
+        // 2. ชื่อบัญชีสำหรับแสดงผลหน้าเว็บให้ลูกค้าโอน
+        const DISPLAY_RECEIVER_NAME = 'แดนนี่สโตร์';
+        
+        // 3. คีย์เวิร์ดตรวจสอบสลิป (ใส่กี่คำก็ได้ คั่นด้วยเครื่องหมายลูกน้ำ)
+        // *หากระบบเจอคำใดคำหนึ่งในนี้ ถือว่าผ่าน*
+        const RECEIVER_KEYWORDS = ['แดนนี่สโตร์', 'แดนนี่', 'พลอยไพลิน', 'วรรณสว่าง']; 
         
         // ==========================================
         
@@ -315,7 +320,7 @@
         window.onload = () => {
             // โหลดข้อมูล QR Code และ ชื่อ เข้าไปในหน้าเว็บ
             document.getElementById('qrImageDisplay').src = QR_CODE_IMAGE_URL;
-            document.getElementById('receiverNameDisplay').innerText = RECEIVER_NAME;
+            document.getElementById('receiverNameDisplay').innerText = DISPLAY_RECEIVER_NAME;
             
             checkInAppBrowser();
             fetchData();
@@ -506,7 +511,7 @@
         });
         slipInput.addEventListener('change', (e) => { if (e.target.files.length) handleFile(e.target.files[0]); });
 
-        // ระบบ Tesseract.js (OCR ตรวจสอบชื่อบัญชีและยอดเงินในสลิป)
+        // ระบบ Tesseract.js (OCR ตรวจสอบคีย์เวิร์ดชื่อและยอดเงินในสลิป)
         async function handleFile(file) {
             if (!file.type.match('image.*')) return alert('กรุณาอัปโหลดไฟล์รูปภาพเท่านั้น');
             
@@ -522,9 +527,15 @@
                     const result = await Tesseract.recognize(tempBase64, 'tha+eng');
                     const extractedText = result.data.text.replace(/\s+/g, ''); // ตัดช่องว่าง
                     
-                    // เงื่อนไขที่ 1: ตรวจสอบชื่อ
-                    const targetName = RECEIVER_NAME.replace(/\s+/g, '');
-                    const hasName = extractedText.includes(targetName);
+                    // เงื่อนไขที่ 1: ตรวจสอบหาคีย์เวิร์ดชื่อ (เจอคำใดคำหนึ่งถือว่าผ่าน)
+                    let hasName = false;
+                    for (let keyword of RECEIVER_KEYWORDS) {
+                        let cleanKeyword = keyword.replace(/\s+/g, '');
+                        if (cleanKeyword && extractedText.includes(cleanKeyword)) {
+                            hasName = true;
+                            break;
+                        }
+                    }
                     
                     // เงื่อนไขที่ 2: ตรวจสอบยอดเงิน (ดึงยอดรวมจากตะกร้าปัจจุบัน)
                     const totalAmount = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
@@ -539,7 +550,7 @@
                         document.getElementById('slipPreview').classList.remove('hidden');
                         document.getElementById('dropContent').classList.add('hidden');
                     } else if (!hasName) {
-                        alert(`ตรวจสอบสลิปไม่ผ่าน!\nไม่พบชื่อบัญชี "${RECEIVER_NAME}" ในสลิปของคุณ`);
+                        alert(`ตรวจสอบสลิปไม่ผ่าน!\nไม่พบคีย์เวิร์ดชื่อผู้รับเงินในสลิปของคุณ`);
                         slipBase64Str = null;
                         document.getElementById('slipInput').value = '';
                     } else {
@@ -623,7 +634,7 @@
         // ==========================================
         function openAdmin() {
             const pwd = prompt("กรุณาใส่รหัสผ่านเพื่อเข้าสู่ระบบหลังบ้าน:");
-            if(pwd === "Dd288528") {
+            if(pwd === "0000s") {
                 document.getElementById('adminModal').classList.remove('hidden');
                 renderAdminProducts();
                 if(popupDataCache) {
