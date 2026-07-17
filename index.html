@@ -14,14 +14,16 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="white">
     <meta name="theme-color" content="#ffffff">
     <link rel="apple-touch-icon" href="https://img1.pic.in.th/images/IMG_660722f5f0118feb0b69.png">
-    <!-- Embedded Manifest -->
+    <!-- Embedded Manifest with New Name and Logo -->
     <link rel="manifest" href="data:application/manifest+json;charset=utf-8,%7B%22name%22%3A%22Dannyofficials%22%2C%22short_name%22%3A%22Dannyofficials%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%23ffffff%22%2C%22theme_color%22%3A%22%23ffffff%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22https%3A%2F%2Fimg1.pic.in.th%2Fimages%2FIMG_660722f5f0118feb0b69.png%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%2Fpng%22%7D%5D%7D">
 
     <!-- Libraries -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <!-- Tesseract OCR -->
+    <!-- jsQR สำหรับอ่าน QR Code ในภาพสลิป -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <!-- Tesseract OCR สำหรับอ่านตัวเลขยอดเงิน -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     
     <style>
@@ -153,9 +155,9 @@
                     <div id="dropZone" class="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center cursor-pointer hover:bg-slate-50 transition relative overflow-hidden">
                         <input type="file" id="slipInput" accept="image/*" class="hidden">
                         <div id="dropContent">
-                            <i class="fas fa-cloud-upload-alt text-3xl text-slate-400 mb-2"></i>
+                            <i class="fas fa-qrcode text-3xl text-slate-400 mb-2"></i>
                             <p class="text-sm text-slate-600">คลิก หรือ ลากรูปภาพสลิปมาวางที่นี่</p>
-                            <p class="text-[10px] text-red-500 mt-2">* ระบบจะตรวจสอบชื่อและยอดเงินในสลิปอัตโนมัติ</p>
+                            <p class="text-[10px] text-red-500 mt-2">* ระบบจะสแกน QR Code ป้องกันสลิปซ้ำและอ่านยอดเงินอัตโนมัติ</p>
                         </div>
                         <img id="slipPreview" class="hidden absolute inset-0 w-full h-full object-contain bg-white">
                     </div>
@@ -299,15 +301,11 @@
         
         const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbx84DULO0-aCCbPyv7FtG6JpeIXljaJ7ZJ7tFYfN_A4sE5K1cL22jmFY02QH-GpCikB/exec'; // ใส่ URL จาก Google Apps Script
         
-        // 1. ลิงก์รูปภาพ QR Code
-        const QR_CODE_IMAGE_URL = 'https://img2.pic.in.th/IMG_6610d23c9fa6b5043eea.jpeg'; 
+        // 1. ลิงก์รูปภาพ QR Code (นำลิงก์มาวางแทนที่ด้านล่าง)
+        const QR_CODE_IMAGE_URL = 'https://img2.pic.in.th/IMG_6610bff6791f2082df2a.jpeg'; 
         
         // 2. ชื่อบัญชีสำหรับแสดงผลหน้าเว็บให้ลูกค้าโอน
         const DISPLAY_RECEIVER_NAME = 'แดนนี่สโตร์';
-        
-        // 3. คีย์เวิร์ดตรวจสอบสลิป (ใส่กี่คำก็ได้ คั่นด้วยเครื่องหมายลูกน้ำ)
-        // *หากระบบเจอคำใดคำหนึ่งในนี้ ถือว่าผ่าน*
-        const RECEIVER_KEYWORDS = ['แดนนี่สโตร์', 'แดนนี่', 'พลอยไพลิน', 'วรรณสว่าง', 'แดน']; 
         
         // ==========================================
         
@@ -316,6 +314,7 @@
         let cart = [];
         let isProcessing = false;
         let slipBase64Str = null;
+        let qrPayloadStr = null;
 
         window.onload = () => {
             // โหลดข้อมูล QR Code และ ชื่อ เข้าไปในหน้าเว็บ
@@ -499,6 +498,14 @@
         }
         function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
+        function resetSlipInput() {
+            slipBase64Str = null;
+            qrPayloadStr = null;
+            document.getElementById('slipInput').value = '';
+            document.getElementById('slipPreview').classList.add('hidden');
+            document.getElementById('dropContent').classList.remove('hidden');
+        }
+
         const dropZone = document.getElementById('dropZone');
         const slipInput = document.getElementById('slipInput');
         
@@ -511,69 +518,74 @@
         });
         slipInput.addEventListener('change', (e) => { if (e.target.files.length) handleFile(e.target.files[0]); });
 
-        // ระบบ Tesseract.js (OCR ตรวจสอบคีย์เวิร์ดชื่อและยอดเงินในสลิป)
+        // ระบบ 1. สแกนหา QR Code และ 2. ทำ OCR อ่านตัวเลขยอดเงิน
         async function handleFile(file) {
             if (!file.type.match('image.*')) return alert('กรุณาอัปโหลดไฟล์รูปภาพเท่านั้น');
             
             document.getElementById('loadingOverlay').classList.remove('hidden');
-            document.querySelector('#loadingOverlay p').innerText = "กำลังตรวจสอบสลิป...";
+            document.querySelector('#loadingOverlay p').innerText = "กำลังสแกนสลิป...";
 
-            try {
-                const reader = new FileReader();
-                reader.onload = async (e) => {
-                    const tempBase64 = e.target.result;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = async () => {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx.drawImage(img, 0, 0, img.width, img.height);
                     
-                    // ทำ OCR อ่านข้อความ
-                    const result = await Tesseract.recognize(tempBase64, 'tha+eng');
-                    const extractedText = result.data.text.replace(/\s+/g, ''); // ตัดช่องว่าง
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                     
-                    // เงื่อนไขที่ 1: ตรวจสอบหาคีย์เวิร์ดชื่อ (เจอคำใดคำหนึ่งถือว่าผ่าน)
-                    let hasName = false;
-                    for (let keyword of RECEIVER_KEYWORDS) {
-                        let cleanKeyword = keyword.replace(/\s+/g, '');
-                        if (cleanKeyword && extractedText.includes(cleanKeyword)) {
-                            hasName = true;
-                            break;
+                    // 1. ค้นหา QR Code จากสลิป
+                    const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                        inversionAttempts: "dontInvert",
+                    });
+
+                    if (code) {
+                        qrPayloadStr = code.data; 
+                        
+                        document.querySelector('#loadingOverlay p').innerText = "กำลังตรวจสอบยอดเงิน...";
+                        try {
+                            // 2. ใช้ OCR อ่านตัวหนังสือบนรูปภาพเพื่อหายอดเงิน
+                            const result = await Tesseract.recognize(e.target.result, 'tha+eng');
+                            const extractedText = result.data.text.replace(/\s+/g, ''); 
+                            
+                            const totalAmount = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+                            const amountStr1 = totalAmount.toString();
+                            const amountStr2 = totalAmount.toFixed(2).toString();
+                            
+                            if (extractedText.includes(amountStr1) || extractedText.includes(amountStr2)) {
+                                // พบยอดเงินตรงกับที่ต้องชำระ
+                                slipBase64Str = e.target.result;
+                                document.getElementById('slipPreview').src = slipBase64Str;
+                                document.getElementById('slipPreview').classList.remove('hidden');
+                                document.getElementById('dropContent').classList.add('hidden');
+                            } else {
+                                alert(`ตรวจสอบสลิปไม่ผ่าน!\nยอดเงินในสลิปไม่ตรงกับยอดที่ต้องชำระ (${totalAmount} บาท)`);
+                                resetSlipInput();
+                            }
+                        } catch (err) {
+                            alert('ระบบตรวจสอบยอดเงินขัดข้อง: ' + err);
+                            resetSlipInput();
                         }
-                    }
-                    
-                    // เงื่อนไขที่ 2: ตรวจสอบยอดเงิน (ดึงยอดรวมจากตะกร้าปัจจุบัน)
-                    const totalAmount = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-                    const amountStr1 = totalAmount.toString();
-                    const amountStr2 = totalAmount.toFixed(2).toString();
-                    const hasAmount = extractedText.includes(amountStr1) || extractedText.includes(amountStr2);
-                    
-                    if(hasName && hasAmount) {
-                        // ผ่านทั้งชื่อและยอดเงิน
-                        slipBase64Str = tempBase64;
-                        document.getElementById('slipPreview').src = slipBase64Str;
-                        document.getElementById('slipPreview').classList.remove('hidden');
-                        document.getElementById('dropContent').classList.add('hidden');
-                    } else if (!hasName) {
-                        alert(`ตรวจสอบสลิปไม่ผ่าน!\nไม่พบคีย์เวิร์ดชื่อผู้รับเงินในสลิปของคุณ`);
-                        slipBase64Str = null;
-                        document.getElementById('slipInput').value = '';
                     } else {
-                        alert(`ตรวจสอบสลิปไม่ผ่าน!\nยอดเงินในสลิปไม่ตรงกับยอดที่ต้องชำระ (${totalAmount} บาท)`);
-                        slipBase64Str = null;
-                        document.getElementById('slipInput').value = '';
+                        alert("ตรวจสอบไม่ผ่าน!\nไม่พบรหัส QR Code ในรูปภาพสลิป กรุณาอัปโหลดรูปที่เห็น QR Code ชัดเจน");
+                        resetSlipInput();
                     }
                     
                     document.getElementById('loadingOverlay').classList.add('hidden');
                     document.querySelector('#loadingOverlay p').innerText = "กำลังประมวลผล...";
                 };
-                reader.readAsDataURL(file);
-            } catch (err) {
-                alert('ระบบตรวจสอบสลิปขัดข้อง กรุณาลองใหม่: ' + err);
-                document.getElementById('loadingOverlay').classList.add('hidden');
-                document.querySelector('#loadingOverlay p').innerText = "กำลังประมวลผล...";
-            }
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
         }
 
         document.getElementById('checkoutForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             if(isProcessing) return;
-            if(!slipBase64Str) return alert('กรุณาแนบสลิปโอนเงินที่ถูกต้อง');
+            if(!slipBase64Str || !qrPayloadStr) return alert('กรุณาแนบสลิปโอนเงินที่ถูกต้อง');
 
             const email = document.getElementById('customerEmail').value;
             const total = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
@@ -581,7 +593,13 @@
             isProcessing = true;
             document.getElementById('loadingOverlay').classList.remove('hidden');
             
-            const payload = { email: email, cart: cart, total: total, slipBase64: slipBase64Str };
+            const payload = { 
+                email: email, 
+                cart: cart, 
+                total: total, 
+                slipBase64: slipBase64Str,
+                qrPayload: qrPayloadStr
+            };
 
             try {
                 if(GAS_WEB_APP_URL === 'YOUR_GOOGLE_WEB_APP_URL_HERE') throw new Error('Demo Mode');
@@ -590,8 +608,13 @@
                     body: JSON.stringify({ action: 'CHECKOUT', payload: payload })
                 });
                 const data = await res.json();
-                if(data.status === 'success') { showReceipt(data.data.orderId, email, total); } 
-                else { alert('Error: ' + data.message); }
+                
+                if(data.status === 'success') { 
+                    showReceipt(data.data.orderId, email, total); 
+                } else { 
+                    alert('ระบบแจ้งเตือน: \n' + data.message); 
+                    resetSlipInput();
+                }
             } catch (error) {
                 console.warn(error);
                 showReceipt('ORD-' + new Date().getTime(), email, total);
@@ -634,7 +657,7 @@
         // ==========================================
         function openAdmin() {
             const pwd = prompt("กรุณาใส่รหัสผ่านเพื่อเข้าสู่ระบบหลังบ้าน:");
-            if(pwd === "0000s") {
+            if(pwd === "Dd288528") {
                 document.getElementById('adminModal').classList.remove('hidden');
                 renderAdminProducts();
                 if(popupDataCache) {
